@@ -4,7 +4,7 @@ import { z } from "zod";
 export const criterionSchema = z.object({
   id: z.string(),
   name: z.string().min(1, "اسم المعيار مطلوب"),
-  passingPercentage: z.number().min(0).max(100),
+  weight: z.number().min(0).max(100),
 });
 
 export type Criterion = z.infer<typeof criterionSchema>;

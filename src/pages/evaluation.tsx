@@ -7,11 +7,11 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { 
-  Plus, 
-  Trash2, 
-  Check, 
-  Printer, 
+import {
+  Plus,
+  Trash2,
+  Check,
+  Printer,
   ChevronRight,
   ListChecks,
   Users,
@@ -21,60 +21,52 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import type { Criterion, Competitor, Score, EvaluationProject } from "@shared/schema";
 
-const STORAGE_KEY = "evaluation_project";
+
+import { storage } from "@/lib/storage";
 
 export default function EvaluationPage() {
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
   const [projectTitle, setProjectTitle] = useState("مصفوفة التقييم الفنية");
-  
+
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
-  
+
   const [newCriterionName, setNewCriterionName] = useState("");
-  const [newCriterionPercentage, setNewCriterionPercentage] = useState(50);
+  const [newCriterionPercentage, setNewCriterionPercentage] = useState(10);
   const [newCompetitorName, setNewCompetitorName] = useState("");
-  
+
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadFromLocalStorage();
+    loadFromStorage();
   }, []);
 
   useEffect(() => {
-    saveToLocalStorage();
+    saveToStorage();
   }, [criteria, competitors, scores, projectTitle]);
 
-  const loadFromLocalStorage = () => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const project: EvaluationProject = JSON.parse(saved);
-        setCriteria(project.criteria || []);
-        setCompetitors(project.competitors || []);
-        setScores(project.scores || []);
-        setProjectTitle(project.projectTitle || "مصفوفة التقييم الفنية");
-      }
-    } catch (error) {
-      console.error("Error loading from localStorage:", error);
+  const loadFromStorage = () => {
+    const project = storage.getProject();
+    if (project) {
+      setCriteria(project.criteria || []);
+      setCompetitors(project.competitors || []);
+      setScores(project.scores || []);
+      setProjectTitle(project.projectTitle || "مصفوفة التقييم الفنية");
     }
   };
 
-  const saveToLocalStorage = () => {
-    try {
-      const project: EvaluationProject = {
-        criteria,
-        competitors,
-        scores,
-        projectTitle,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-    } catch (error) {
-      console.error("Error saving to localStorage:", error);
-    }
+  const saveToStorage = () => {
+    const project: EvaluationProject = {
+      criteria,
+      competitors,
+      scores,
+      projectTitle,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    storage.saveProject(project);
   };
 
   const addCriterion = () => {
@@ -90,12 +82,12 @@ export default function EvaluationPage() {
     const newCriterion: Criterion = {
       id: Date.now().toString(),
       name: newCriterionName,
-      passingPercentage: newCriterionPercentage,
+      weight: newCriterionPercentage,
     };
 
     setCriteria([...criteria, newCriterion]);
     setNewCriterionName("");
-    setNewCriterionPercentage(50);
+    setNewCriterionPercentage(10);
 
     toast({
       title: "تم الإضافة",
@@ -160,7 +152,8 @@ export default function EvaluationPage() {
 
   const calculateTotalScore = (competitorId: string): number => {
     return criteria.reduce((total, criterion) => {
-      return total + getScore(criterion.id, competitorId);
+      const score = getScore(criterion.id, competitorId);
+      return total + (score * (criterion.weight / 100));
     }, 0);
   };
 
@@ -170,9 +163,12 @@ export default function EvaluationPage() {
   };
 
   const getPassedCriteriaCount = (competitorId: string): number => {
+    // In weighted system, passing is determined by total score usually, but if per-criterion passing is needed:
+    // Assuming 50% is pass for individual criterion score for now, or we can remove this metric if not relevant.
+    // Let's keep it as "score >= 50" for now as a default pass mark for the criterion itself.
     return criteria.filter(criterion => {
       const score = getScore(criterion.id, competitorId);
-      return score >= criterion.passingPercentage;
+      return score >= 50;
     }).length;
   };
 
@@ -191,8 +187,24 @@ export default function EvaluationPage() {
     window.print();
   };
 
+  const validateWeights = (): boolean => {
+    const totalWeight = criteria.reduce((sum, c) => sum + c.weight, 0);
+    if (totalWeight !== 100) {
+      toast({
+        title: "تنبيه",
+        description: `مجموع أوزان المعايير يجب أن يكون 100% (المجموع الحالي: ${totalWeight}%)`,
+        variant: "destructive",
+      });
+      return false;
+    }
+    return true;
+  };
+
   const canProceedToStep = (step: number): boolean => {
-    if (step === 2) return criteria.length > 0;
+    if (step === 2) {
+      const totalWeight = criteria.reduce((sum, c) => sum + c.weight, 0);
+      return criteria.length > 0 && totalWeight === 100;
+    }
     if (step === 3) return criteria.length > 0 && competitors.length > 0;
     if (step === 4) return criteria.length > 0 && competitors.length > 0;
     return true;
@@ -215,9 +227,9 @@ export default function EvaluationPage() {
               <p className="text-sm text-muted-foreground" data-testid="text-project-subtitle">نظام تقييم فني شامل للمشاريع والشركات</p>
             </div>
             {currentStep === 4 && (
-              <Button 
-                onClick={handlePrint} 
-                size="lg" 
+              <Button
+                onClick={handlePrint}
+                size="lg"
                 className="gap-2"
                 data-testid="button-print"
               >
@@ -236,19 +248,19 @@ export default function EvaluationPage() {
                     disabled={!canProceedToStep(step.number)}
                     className={`
                       flex items-center gap-3 p-4 rounded-lg transition-all w-full
-                      ${currentStep === step.number 
-                        ? 'bg-primary text-primary-foreground' 
+                      ${currentStep === step.number
+                        ? 'bg-primary text-primary-foreground'
                         : canProceedToStep(step.number)
-                        ? 'bg-card hover-elevate active-elevate-2 cursor-pointer'
-                        : 'bg-muted/50 text-muted-foreground cursor-not-allowed'
+                          ? 'bg-card hover-elevate active-elevate-2 cursor-pointer'
+                          : 'bg-muted/50 text-muted-foreground cursor-not-allowed'
                       }
                     `}
                     data-testid={`button-step-${step.number}`}
                   >
                     <div className={`
                       w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
-                      ${currentStep === step.number 
-                        ? 'bg-primary-foreground/20' 
+                      ${currentStep === step.number
+                        ? 'bg-primary-foreground/20'
                         : 'bg-background/10'
                       }
                     `}>
@@ -280,7 +292,7 @@ export default function EvaluationPage() {
               <Card data-testid="card-criteria-setup">
                 <CardHeader>
                   <CardTitle className="text-xl" data-testid="text-criteria-card-title">إضافة معايير التقييم</CardTitle>
-                  <CardDescription data-testid="text-criteria-card-description">حدد المعايير التي سيتم تقييم المتنافسين بناءً عليها مع نسبة الاجتياز لكل معيار</CardDescription>
+                  <CardDescription data-testid="text-criteria-card-description">حدد المعايير التي سيتم تقييم المتنافسين بناءً عليها مع وزن لكل معيار (المجموع يجب أن يكون 100%)</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-4">
@@ -292,13 +304,14 @@ export default function EvaluationPage() {
                         value={newCriterionName}
                         onChange={(e) => setNewCriterionName(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && addCriterion()}
+                        disabled={criteria.reduce((sum, c) => sum + c.weight, 0) >= 100}
                         data-testid="input-criterion-name"
                       />
                     </div>
 
                     <div className="space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <Label data-testid="label-criterion-percentage">نسبة الاجتياز</Label>
+                        <Label data-testid="label-criterion-percentage">وزن المعيار</Label>
                         <Badge variant="secondary" className="font-mono text-lg" data-testid="text-criterion-percentage">
                           {newCriterionPercentage}%
                         </Badge>
@@ -310,14 +323,16 @@ export default function EvaluationPage() {
                         max={100}
                         step={5}
                         className="w-full"
+                        disabled={criteria.reduce((sum, c) => sum + c.weight, 0) >= 100}
                         data-testid="slider-criterion-percentage"
                       />
                     </div>
 
-                    <Button 
-                      onClick={addCriterion} 
+                    <Button
+                      onClick={addCriterion}
                       className="w-full gap-2"
                       size="lg"
+                      disabled={criteria.reduce((sum, c) => sum + c.weight, 0) >= 100}
                       data-testid="button-add-criterion"
                     >
                       <Plus className="w-5 h-5" />
@@ -329,7 +344,9 @@ export default function EvaluationPage() {
                     <>
                       <Separator />
                       <div className="space-y-3">
-                        <h3 className="text-base font-semibold" data-testid="text-criteria-list-title">المعايير المضافة ({criteria.length})</h3>
+                        <h3 className="text-base font-semibold" data-testid="text-criteria-list-title">
+                          المعايير المضافة ({criteria.length}) - المجموع: {criteria.reduce((sum, c) => sum + c.weight, 0)}%
+                        </h3>
                         <div className="space-y-2">
                           {criteria.map((criterion) => (
                             <div
@@ -340,9 +357,9 @@ export default function EvaluationPage() {
                               <div className="flex-1">
                                 <div className="font-medium text-base mb-2" data-testid={`text-criterion-name-${criterion.id}`}>{criterion.name}</div>
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm text-muted-foreground">نسبة الاجتياز:</span>
+                                  <span className="text-sm text-muted-foreground">الوزن:</span>
                                   <Badge variant="outline" className="font-mono" data-testid={`text-criterion-passing-${criterion.id}`}>
-                                    {criterion.passingPercentage}%
+                                    {criterion.weight}%
                                   </Badge>
                                 </div>
                               </div>
@@ -367,7 +384,11 @@ export default function EvaluationPage() {
               {criteria.length > 0 && (
                 <div className="flex flex-wrap justify-end gap-4">
                   <Button
-                    onClick={() => setCurrentStep(2)}
+                    onClick={() => {
+                      if (validateWeights()) {
+                        setCurrentStep(2);
+                      }
+                    }}
                     size="lg"
                     className="gap-2"
                     data-testid="button-next-to-competitors"
@@ -401,7 +422,7 @@ export default function EvaluationPage() {
                           className="flex-1"
                           data-testid="input-competitor-name"
                         />
-                        <Button 
+                        <Button
                           onClick={addCompetitor}
                           className="gap-2"
                           data-testid="button-add-competitor"
@@ -485,7 +506,7 @@ export default function EvaluationPage() {
                       <thead>
                         <tr className="border-b border-border">
                           <th className="p-4 text-right font-semibold bg-muted/50" data-testid="header-matrix-criterion">المعيار</th>
-                          <th className="p-4 text-center font-semibold bg-muted/50 text-xs" data-testid="header-matrix-passing">الاجتياز</th>
+                          <th className="p-4 text-center font-semibold bg-muted/50 text-xs" data-testid="header-matrix-passing">الوزن</th>
                           {competitors.map((competitor) => (
                             <th
                               key={competitor.id}
@@ -505,12 +526,12 @@ export default function EvaluationPage() {
                             </td>
                             <td className="p-4 text-center">
                               <Badge variant="outline" className="font-mono text-xs" data-testid={`text-matrix-passing-${criterion.id}`}>
-                                {criterion.passingPercentage}%
+                                {criterion.weight}%
                               </Badge>
                             </td>
                             {competitors.map((competitor) => {
                               const score = getScore(criterion.id, competitor.id);
-                              const isPassed = score >= criterion.passingPercentage;
+                              const isPassed = score >= 50;
                               return (
                                 <td key={competitor.id} className="p-4">
                                   <div className="flex flex-col gap-2">
@@ -554,10 +575,10 @@ export default function EvaluationPage() {
                               data-testid={`total-score-${competitor.id}`}
                             >
                               <div className="text-2xl font-bold font-mono text-primary" data-testid={`text-total-value-${competitor.id}`}>
-                                {calculateTotalScore(competitor.id)}
+                                {calculateTotalScore(competitor.id).toFixed(2)}%
                               </div>
                               <div className="text-xs text-muted-foreground mt-1" data-testid={`text-average-value-${competitor.id}`}>
-                                معدل: {calculateAverageScore(competitor.id).toFixed(1)}
+                                {/* Average is less relevant in weighted sum, maybe show raw sum or nothing */}
                               </div>
                             </td>
                           ))}
@@ -571,10 +592,10 @@ export default function EvaluationPage() {
               <div className="flex flex-wrap justify-between gap-4">
                 <Button
                   variant="outline"
-                  onClick={() => setCurrentStep(2)}
+                  onClick={() => setCurrentStep(1)}
                   size="lg"
                   className="gap-2"
-                  data-testid="button-back-to-competitors"
+                  data-testid="button-back-to-criteria"
                 >
                   <ChevronRight className="w-5 h-5 rotate-180" />
                   السابق
@@ -615,7 +636,7 @@ export default function EvaluationPage() {
                   <CardHeader className="space-y-0 pb-2">
                     <CardDescription data-testid="text-stat-max-label">الدرجة القصوى</CardDescription>
                     <CardTitle className="text-3xl font-bold font-mono" data-testid="text-max-score">
-                      {criteria.length * 100}
+                      100%
                     </CardTitle>
                   </CardHeader>
                 </Card>
@@ -648,24 +669,21 @@ export default function EvaluationPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span>المجموع:</span>
                             <Badge variant="secondary" className="font-mono text-base" data-testid={`text-rank-total-${index + 1}`}>
-                              {competitor.totalScore}
+                              {competitor.totalScore.toFixed(2)}%
                             </Badge>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <span>المعدل:</span>
                             <Badge variant="outline" className="font-mono" data-testid={`text-rank-average-${index + 1}`}>
-                              {competitor.averageScore.toFixed(1)}%
+                              {competitor.averageScore.toFixed(1)}
                             </Badge>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <span>الاجتياز:</span>
-                            <Badge variant={competitor.passedCount === criteria.length ? "default" : "secondary"} data-testid={`text-rank-passed-${index + 1}`}>
-                              {competitor.passedCount} من {criteria.length}
-                            </Badge>
+                            {/* Removed passed count as it's less relevant for weighted total */}
                           </div>
                         </div>
-                        <Progress 
-                          value={competitor.averageScore} 
+                        <Progress
+                          value={competitor.totalScore}
                           className="mt-3 h-2"
                           data-testid={`progress-rank-${index + 1}`}
                         />
@@ -684,46 +702,43 @@ export default function EvaluationPage() {
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="border-b-2 border-border">
-                          <th className="p-4 text-right font-semibold" data-testid="header-report-criterion">المعيار</th>
-                          <th className="p-4 text-center font-semibold text-xs" data-testid="header-report-passing">الاجتياز</th>
-                          {getRankedCompetitors().map((competitor) => (
-                            <th key={competitor.id} className="p-4 text-center font-semibold" data-testid={`header-report-competitor-${competitor.id}`}>
-                              {competitor.name}
+                          <th className="p-4 text-right font-semibold" data-testid="header-report-competitor">المتنافس</th>
+                          {criteria.map((criterion) => (
+                            <th key={criterion.id} className="p-4 text-center font-semibold" data-testid={`header-report-criterion-${criterion.id}`}>
+                              <div className="flex flex-col items-center gap-1">
+                                <span>{criterion.name}</span>
+                                <Badge variant="outline" className="text-[10px] font-normal">
+                                  {criterion.weight}%
+                                </Badge>
+                              </div>
                             </th>
                           ))}
+                          <th className="p-4 text-center font-semibold bg-muted/20" data-testid="header-report-total">المجموع</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {criteria.map((criterion, index) => (
-                          <tr 
-                            key={criterion.id} 
+                        {getRankedCompetitors().map((competitor, index) => (
+                          <tr
+                            key={competitor.id}
                             className={`border-b border-border ${index % 2 === 0 ? 'bg-muted/20' : ''}`}
-                            data-testid={`row-report-criterion-${criterion.id}`}
+                            data-testid={`row-report-competitor-${competitor.id}`}
                           >
-                            <td className="p-4 font-medium" data-testid={`text-report-criterion-name-${criterion.id}`}>{criterion.name}</td>
-                            <td className="p-4 text-center">
-                              <Badge variant="outline" className="font-mono text-xs" data-testid={`text-report-passing-${criterion.id}`}>
-                                {criterion.passingPercentage}%
-                              </Badge>
-                            </td>
-                            {getRankedCompetitors().map((competitor, compIndex) => {
+                            <td className="p-4 font-medium" data-testid={`text-report-competitor-name-${competitor.id}`}>{competitor.name}</td>
+                            {criteria.map((criterion) => {
                               const score = getScore(criterion.id, competitor.id);
-                              const isPassed = score >= criterion.passingPercentage;
+                              const weightedScore = score * (criterion.weight / 100);
                               return (
-                                <td key={competitor.id} className="p-4 text-center">
+                                <td key={criterion.id} className="p-4 text-center">
                                   <div className="flex flex-col items-center gap-1">
-                                    <span className="text-xl font-bold font-mono" data-testid={`text-report-score-${criterion.id}-${competitor.id}`}>{score}</span>
-                                    <Badge
-                                      variant={isPassed ? "default" : "destructive"}
-                                      className="text-xs"
-                                      data-testid={`badge-report-status-${criterion.id}-${competitor.id}`}
-                                    >
-                                      {isPassed ? "✓" : "✗"}
-                                    </Badge>
+                                    <span className="font-mono font-bold" data-testid={`text-report-score-${competitor.id}-${criterion.id}`}>{score}</span>
+                                    <span className="text-xs text-muted-foreground">({weightedScore.toFixed(1)})</span>
                                   </div>
                                 </td>
                               );
                             })}
+                            <td className="p-4 text-center font-bold font-mono text-primary bg-muted/20">
+                              {calculateTotalScore(competitor.id).toFixed(2)}%
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -766,9 +781,7 @@ export default function EvaluationPage() {
                 <tr className="bg-muted">
                   <th className="p-3 text-right border-b border-border" data-testid="header-print-rank-position">الترتيب</th>
                   <th className="p-3 text-right border-b border-border" data-testid="header-print-rank-competitor">المتنافس</th>
-                  <th className="p-3 text-center border-b border-border" data-testid="header-print-rank-total">المجموع</th>
-                  <th className="p-3 text-center border-b border-border" data-testid="header-print-rank-average">المعدل</th>
-                  <th className="p-3 text-center border-b border-border" data-testid="header-print-rank-passed">الاجتياز</th>
+                  <th className="p-3 text-center border-b border-border" data-testid="header-print-rank-total">المجموع (100%)</th>
                 </tr>
               </thead>
               <tbody>
@@ -776,9 +789,7 @@ export default function EvaluationPage() {
                   <tr key={competitor.id} className="border-b border-border" data-testid={`row-print-rank-${index + 1}`}>
                     <td className="p-3 text-center font-bold" data-testid={`text-print-rank-position-${index + 1}`}>{index + 1}</td>
                     <td className="p-3" data-testid={`text-print-rank-name-${index + 1}`}>{competitor.name}</td>
-                    <td className="p-3 text-center font-mono font-bold" data-testid={`text-print-rank-total-${index + 1}`}>{competitor.totalScore}</td>
-                    <td className="p-3 text-center font-mono" data-testid={`text-print-rank-average-${index + 1}`}>{competitor.averageScore.toFixed(1)}%</td>
-                    <td className="p-3 text-center" data-testid={`text-print-rank-passed-${index + 1}`}>{competitor.passedCount} / {criteria.length}</td>
+                    <td className="p-3 text-center font-mono font-bold" data-testid={`text-print-rank-total-${index + 1}`}>{competitor.totalScore.toFixed(2)}%</td>
                   </tr>
                 ))}
               </tbody>
@@ -790,30 +801,37 @@ export default function EvaluationPage() {
             <table className="w-full border border-border" data-testid="table-print-details">
               <thead>
                 <tr className="bg-muted">
-                  <th className="p-3 text-right border-b border-border" data-testid="header-print-detail-criterion">المعيار</th>
-                  <th className="p-3 text-center border-b border-border text-xs" data-testid="header-print-detail-passing">الاجتياز</th>
-                  {getRankedCompetitors().map((competitor) => (
-                    <th key={competitor.id} className="p-3 text-center border-b border-border" data-testid={`header-print-detail-competitor-${competitor.id}`}>
-                      {competitor.name}
+                  <th className="p-3 text-right border-b border-border" data-testid="header-print-detail-competitor">المتنافس</th>
+                  {criteria.map((criterion) => (
+                    <th key={criterion.id} className="p-3 text-center border-b border-border" data-testid={`header-print-detail-criterion-${criterion.id}`}>
+                      <div className="flex flex-col items-center">
+                        <span>{criterion.name}</span>
+                        <span className="text-xs font-normal">({criterion.weight}%)</span>
+                      </div>
                     </th>
                   ))}
+                  <th className="p-3 text-center border-b border-border" data-testid="header-print-detail-total">المجموع</th>
                 </tr>
               </thead>
               <tbody>
-                {criteria.map((criterion) => (
-                  <tr key={criterion.id} className="border-b border-border" data-testid={`row-print-detail-${criterion.id}`}>
-                    <td className="p-3" data-testid={`text-print-detail-criterion-${criterion.id}`}>{criterion.name}</td>
-                    <td className="p-3 text-center font-mono text-sm" data-testid={`text-print-detail-passing-${criterion.id}`}>{criterion.passingPercentage}%</td>
-                    {getRankedCompetitors().map((competitor) => {
+                {getRankedCompetitors().map((competitor) => (
+                  <tr key={competitor.id} className="border-b border-border" data-testid={`row-print-detail-${competitor.id}`}>
+                    <td className="p-3 font-bold" data-testid={`text-print-detail-competitor-${competitor.id}`}>{competitor.name}</td>
+                    {criteria.map((criterion) => {
                       const score = getScore(criterion.id, competitor.id);
-                      const isPassed = score >= criterion.passingPercentage;
+                      const weightedScore = score * (criterion.weight / 100);
                       return (
-                        <td key={competitor.id} className="p-3 text-center" data-testid={`cell-print-detail-${criterion.id}-${competitor.id}`}>
-                          <span className="font-mono font-bold" data-testid={`text-print-detail-score-${criterion.id}-${competitor.id}`}>{score}</span>
-                          <span className="mx-1" data-testid={`icon-print-detail-status-${criterion.id}-${competitor.id}`}>{isPassed ? "✓" : "✗"}</span>
+                        <td key={criterion.id} className="p-3 text-center">
+                          <div className="flex flex-col items-center">
+                            <span className="font-mono">{score}</span>
+                            <span className="text-xs text-muted-foreground">({weightedScore.toFixed(1)})</span>
+                          </div>
                         </td>
                       );
                     })}
+                    <td className="p-3 text-center font-bold font-mono bg-muted/10">
+                      {calculateTotalScore(competitor.id).toFixed(2)}%
+                    </td>
                   </tr>
                 ))}
               </tbody>
