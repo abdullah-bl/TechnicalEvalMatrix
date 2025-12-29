@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "start": "vite preview",
-    "check": "tsc"
+    "check": "tsc",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -76,6 +78,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.20",
     "esbuild": "^0.25.0",
+    "gh-pages": "^6.3.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.20.5",
